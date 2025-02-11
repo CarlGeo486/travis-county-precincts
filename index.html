@@ -118,7 +118,7 @@
         });
 
         // Load and display GeoJSON file with interactivity
-        fetch('TCPrecinctsDem.geojson')  // Ensure this file is correctly referenced
+        fetch('TCPrecinctsDemStats.geojson')  // Ensure this file is correctly referenced
             .then(response => response.json())
             .then(data => {
                 L.geoJSON(data, {
