@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leaflet Map - Austin, TX</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+
+    <style>
+        /* Ensure full-page map */
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* Map container */
+        #map {
+            height: 800px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>Travis County DNC Chair Map</h2>
+    <div id="map"></div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+    <script>
+        // Initialize the map centered on Austin, TX
+        var map = L.map('map').setView([30.2672, -97.7431], 10);
+
+        // Add OpenStreetMap tile layer
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        let activePopup = null; // Track the clicked popup
+        let activeLayer = null; // Track the clicked layer to restore style
+
+        // Function to check if "Precinct Chair Name" is missing
+        function hasChair(feature) {
+            let chairName = feature.properties["Precinct Chair Name"];
+            return chairName && chairName.trim() !== "";  // Returns true if a chair is assigned
+        }
+
+        // Function to style polygons based on whether "Precinct Chair Name" is missing
+        function polygonStyle(feature) {
+            return {
+                color: "blue",  // Keep border blue for all
+                fillColor: "lightblue", // Keep fill color light blue
+                fillOpacity: hasChair(feature) ? 0.5 : 0.0, // Transparent if missing chair
+                weight: 2
+            };
+        }
+
+        // Function to apply hover effects and popups
+        function onEachFeature(feature, layer) {
+            // Create popup content with all attributes
+            let popupContent = "<b>Precinct Information</b><br>";
+            for (let key in feature.properties) {
+                popupContent += `<b>${key}:</b> ${feature.properties[key] || "Not Available"}<br>`;
+            }
+
+            // Bind popup
+            layer.bindPopup(popupContent);
+
+            // Hover effects
+            layer.on("mouseover", function (e) {
+                if (activeLayer !== layer) { // Only apply hover effects if not already clicked
+                    layer.setStyle({
+                        weight: 4,
+                        color: "blue",
+                        fillColor: "blue",
+                        fillOpacity: 0.5
+                    });
+                    layer.openPopup();
+                }
+            });
+
+            layer.on("mouseout", function (e) {
+                if (activeLayer !== layer) { // Prevent resetting style if it's the clicked polygon
+                    layer.setStyle(polygonStyle(layer.feature)); 
+                    layer.closePopup();
+                }
+            });
+
+            // Click event: Hold the popup open and prevent permanent opacity change
+            layer.on("click", function (e) {
+                if (activePopup) {
+                    activePopup.closePopup(); // Close previous active popup
+                }
+                if (activeLayer) {
+                    activeLayer.setStyle(polygonStyle(activeLayer.feature)); // Reset previously clicked layer
+                }
+                
+                activePopup = layer; // Set new active popup
+                activeLayer = layer; // Track clicked layer
+                layer.openPopup();
+            });
+        }
+
+        // Clicking outside precincts resets the clicked polygon's style and closes popup
+        map.on("click", function () {
+            if (activePopup) {
+                activePopup.closePopup();
+                activePopup = null;
+            }
+            if (activeLayer) {
+                activeLayer.setStyle(polygonStyle(activeLayer.feature)); // Reset clicked precinct's style
+                activeLayer = null;
+            }
+        });
+
+        // Load and display GeoJSON file with interactivity
+        fetch('TCPrecinctsDem.geojson')  // Ensure this file is correctly referenced
+            .then(response => response.json())
+            .then(data => {
+                L.geoJSON(data, {
+                    style: polygonStyle,  // Apply polygonStyle dynamically
+                    onEachFeature: onEachFeature  // Apply popups and hover effects
+                }).addTo(map);
+            })
+            .catch(error => console.error('Error loading GeoJSON:', error));
+
+    </script>
+
+</body>
+</html>
