@@ -99,7 +99,7 @@
         const HIDDEN_FIELDS = new Set(["OBJECTID", "Shape__Area", "Shape__Length"]);
 
         // Labels only appear at this zoom and closer; ~300 labels at county zoom is unreadable
-        const LABEL_MIN_ZOOM = 12;
+        const LABEL_MIN_ZOOM = 10;
         const labelLayer = L.layerGroup();
 
         let activeLayer = null; // Precinct whose popup is pinned open by a click
