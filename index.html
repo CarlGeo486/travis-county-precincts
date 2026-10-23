@@ -77,7 +77,7 @@
             integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
     <script>
-        var map = L.map('map').setView([30.2672, -97.7431], 10);
+        var map = L.map('map').setView([30.2672, -97.7431], 12);
 
         // Standard OpenStreetMap tiles. OSM requires a Referer header, so the page must be
         // served from a real http(s) origin (a hosted site or `python -m http.server`);
@@ -231,7 +231,6 @@
 
                 addLegend(data.features.length);
                 buildLabels(geo);
-                if (data.features.length) map.fitBounds(geo.getBounds());
                 updateLabelVisibility();
             } catch (error) {
                 console.error("Error loading precincts:", error);
