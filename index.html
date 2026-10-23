@@ -3,131 +3,243 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Leaflet Map - Austin, TX</title>
+    <title>Travis County Election Precincts</title>
 
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <!-- Leaflet CSS (pinned) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
 
     <style>
-        /* Ensure full-page map */
         html, body {
             height: 100%;
             margin: 0;
             padding: 0;
         }
 
-        /* Map container */
+        /* Header + map fill the viewport */
+        body {
+            display: flex;
+            flex-direction: column;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+
+        h2 {
+            margin: 0;
+            padding: 10px 16px;
+        }
+
         #map {
-            height: 800px;
+            flex: 1;
             width: 100%;
+        }
+
+        .legend {
+            background: white;
+            padding: 8px 10px;
+            border-radius: 4px;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+            line-height: 1.6;
+            font-size: 13px;
+        }
+
+        .precinct-info {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        /* Precinct number labels */
+        .precinct-label span {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            white-space: nowrap;
+            font-size: 11px;
+            font-weight: 600;
+            color: #0b2a6f;
+            text-shadow: 0 0 3px white, 0 0 3px white, 0 0 3px white;
+            pointer-events: none;
+        }
+
+        .notice {
+            padding: 8px 16px;
+            font-size: 14px;
+            background: #fdecea;
+            color: #b00020;
         }
     </style>
 </head>
 <body>
 
-    <h2>Travis County Precinct Chair Map</h2>
+    <h2>Travis County Election Precincts</h2>
     <div id="map"></div>
 
-    <!-- Leaflet JS -->
-    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <!-- Leaflet JS (pinned) -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
     <script>
-        // Initialize the map centered on Austin, TX
         var map = L.map('map').setView([30.2672, -97.7431], 10);
 
-        // Add OpenStreetMap tile layer
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
+        // Standard OpenStreetMap tiles. OSM requires a Referer header, so the page must be
+        // served from a real http(s) origin (a hosted site or `python -m http.server`);
+        // opened from disk or in an embedded preview, the tiles show a "Referer is required" block.
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            referrerPolicy: 'strict-origin-when-cross-origin',
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         }).addTo(map);
 
-        let activePopup = null; // Track the clicked popup
-        let activeLayer = null; // Track the clicked layer to restore style
+        // Live boundaries from the Travis County Tax Office (Voter Registration).
+        // outSR=4326 returns lat/lng; the native projection is Texas Central State Plane feet.
+        const PRECINCTS_URL =
+            "https://taxmaps.traviscountytx.gov/arcgis/rest/services/Precincts/FeatureServer/0/query" +
+            "?where=1%3D1&outFields=*&outSR=4326&f=geojson";
+        const PRECINCT_FIELD = "Precinct";
 
-        // Function to check if "Precinct Chair Name" is missing
-        function hasChair(feature) {
-            let chairName = feature.properties["Precinct Chair Name"];
-            return chairName && chairName.trim() !== "";  // Returns true if a chair is assigned
+        // Service bookkeeping fields not worth showing in popups
+        const HIDDEN_FIELDS = new Set(["OBJECTID", "Shape__Area", "Shape__Length"]);
+
+        // Labels only appear at this zoom and closer; ~300 labels at county zoom is unreadable
+        const LABEL_MIN_ZOOM = 12;
+        const labelLayer = L.layerGroup();
+
+        let activeLayer = null; // Precinct whose popup is pinned open by a click
+
+        const BASE_STYLE = {
+            color: "blue",
+            fillColor: "lightblue",
+            fillOpacity: 0.2,
+            weight: 2
+        };
+
+        const HOVER_STYLE = {
+            weight: 4,
+            color: "blue",
+            fillColor: "blue",
+            fillOpacity: 0.5
+        };
+
+        // Escape property values before inserting them as HTML
+        function escapeHtml(value) {
+            return String(value)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#39;");
         }
 
-        // Function to style polygons based on whether "Precinct Chair Name" is missing
-        function polygonStyle(feature) {
-            return {
-                color: "blue",  // Keep border blue for all
-                fillColor: "lightblue", // Keep fill color light blue
-                fillOpacity: hasChair(feature) ? 0.5 : 0.0, // Transparent if missing chair
-                weight: 2
-            };
+        function buildContent(properties) {
+            let html = '<div class="precinct-info"><b>Precinct Information</b><br>';
+            for (const key in properties) {
+                if (HIDDEN_FIELDS.has(key)) continue;
+                const raw = properties[key];
+                // Keeps 0; only null/undefined/empty string count as missing
+                const value = (raw === null || raw === undefined || raw === "") ? "Not Available" : raw;
+                html += `<b>${escapeHtml(key)}:</b> ${escapeHtml(value)}<br>`;
+            }
+            return html + "</div>";
         }
 
-        // Function to apply hover effects and popups
         function onEachFeature(feature, layer) {
-            // Create popup content with all attributes
-            let popupContent = "<b>Precinct Information</b><br>";
-            for (let key in feature.properties) {
-                popupContent += `<b>${key}:</b> ${feature.properties[key] || "Not Available"}<br>`;
-            }
+            // Click-only popup. Panning once on click is fine.
+            layer.bindPopup(buildContent(feature.properties), { autoPanPadding: [20, 20], maxWidth: 350 });
 
-            // Bind popup
-            layer.bindPopup(popupContent);
-
-            // Hover effects
-            layer.on("mouseover", function (e) {
-                if (activeLayer !== layer) { // Only apply hover effects if not already clicked
-                    layer.setStyle({
-                        weight: 4,
-                        color: "blue",
-                        fillColor: "blue",
-                        fillOpacity: 0.5
-                    });
-                    layer.openPopup();
-                }
+            // Hover only highlights the precinct
+            layer.on("mouseover", function () {
+                if (layer === activeLayer) return;
+                layer.setStyle(HOVER_STYLE);
+                layer.bringToFront();
             });
 
-            layer.on("mouseout", function (e) {
-                if (activeLayer !== layer) { // Prevent resetting style if it's the clicked polygon
-                    layer.setStyle(polygonStyle(layer.feature)); 
-                    layer.closePopup();
-                }
+            layer.on("mouseout", function () {
+                if (layer !== activeLayer) layer.setStyle(BASE_STYLE);
             });
 
-            // Click event: Hold the popup open and prevent permanent opacity change
             layer.on("click", function (e) {
-                if (activePopup) {
-                    activePopup.closePopup(); // Close previous active popup
-                }
-                if (activeLayer) {
-                    activeLayer.setStyle(polygonStyle(activeLayer.feature)); // Reset previously clicked layer
-                }
-                
-                activePopup = layer; // Set new active popup
-                activeLayer = layer; // Track clicked layer
-                layer.openPopup();
+                // Opening this popup closes any other one first, whose popupclose
+                // handler resets that precinct's style.
+                layer.openPopup(e.latlng);
+                activeLayer = layer;
+                layer.setStyle(HOVER_STYLE);
+                layer.bringToFront();
+            });
+
+            // Covers the ✕ button, clicking empty map, and clicking another precinct
+            layer.on("popupclose", function () {
+                layer.setStyle(BASE_STYLE);
+                if (activeLayer === layer) activeLayer = null;
             });
         }
 
-        // Clicking outside precincts resets the clicked polygon's style and closes popup
-        map.on("click", function () {
-            if (activePopup) {
-                activePopup.closePopup();
-                activePopup = null;
-            }
-            if (activeLayer) {
-                activeLayer.setStyle(polygonStyle(activeLayer.feature)); // Reset clicked precinct's style
-                activeLayer = null;
-            }
-        });
+        function buildLabels(geo) {
+            geo.eachLayer(layer => {
+                const value = layer.feature.properties[PRECINCT_FIELD];
+                if (value === null || value === undefined || value === "") return;
+                L.marker(layer.getCenter(), {
+                    interactive: false, // clicks and hovers pass through to the polygon
+                    keyboard: false,
+                    icon: L.divIcon({
+                        className: "precinct-label",
+                        html: `<span>${escapeHtml(value)}</span>`,
+                        iconSize: null
+                    })
+                }).addTo(labelLayer);
+            });
+        }
 
-        // Load and display GeoJSON file with interactivity
-        fetch('TCPrecinctsDemStats.geojson')  // Ensure this file is correctly referenced
-            .then(response => response.json())
-            .then(data => {
-                L.geoJSON(data, {
-                    style: polygonStyle,  // Apply polygonStyle dynamically
-                    onEachFeature: onEachFeature  // Apply popups and hover effects
+        function updateLabelVisibility() {
+            if (map.getZoom() >= LABEL_MIN_ZOOM) {
+                if (!map.hasLayer(labelLayer)) labelLayer.addTo(map);
+            } else if (map.hasLayer(labelLayer)) {
+                map.removeLayer(labelLayer);
+            }
+        }
+
+        map.on("zoomend", updateLabelVisibility);
+
+        function addLegend(total) {
+            const legend = L.control({ position: "bottomright" });
+            legend.onAdd = function () {
+                const div = L.DomUtil.create("div", "legend");
+                div.innerHTML = `<b>${total}</b> precincts<div style="color:#666">Live data: Travis County Tax Office</div>` +
+                    `<div style="color:#666;font-size:10px;line-height:1.3;max-width:240px;overflow-wrap:anywhere;margin-top:2px">Source: <a href="https://voter-registration-maps-traviscountytx.hub.arcgis.com/pages/gis-maps-and-downloads" target="_blank" rel="noopener noreferrer">https://voter-registration-maps-traviscountytx.hub.arcgis.com/pages/gis-maps-and-downloads</a></div>`;
+                return div;
+            };
+            legend.addTo(map);
+        }
+
+        function showNotice(message) {
+            const div = document.createElement("div");
+            div.className = "notice";
+            div.textContent = message;
+            document.body.insertBefore(div, document.getElementById("map"));
+        }
+
+        async function load() {
+            try {
+                const response = await fetch(PRECINCTS_URL);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                // ArcGIS reports errors with HTTP 200 and an "error" object
+                if (data.error) throw new Error(data.error.message || "ArcGIS service error");
+                if (!Array.isArray(data.features)) throw new Error("Response is not a GeoJSON FeatureCollection");
+
+                const geo = L.geoJSON(data, {
+                    style: BASE_STYLE,
+                    onEachFeature: onEachFeature
                 }).addTo(map);
-            })
-            .catch(error => console.error('Error loading GeoJSON:', error));
 
+                addLegend(data.features.length);
+                buildLabels(geo);
+                if (data.features.length) map.fitBounds(geo.getBounds());
+                updateLabelVisibility();
+            } catch (error) {
+                console.error("Error loading precincts:", error);
+                showNotice(`Couldn't load precinct boundaries from the county server (${error.message}).`);
+            }
+        }
+
+        load();
     </script>
 
 </body>
