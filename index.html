@@ -140,22 +140,43 @@
             return html + "</div>";
         }
 
+        let hoveredLayer = null; // Precinct currently highlighted by hover
+
+        function clearHover() {
+            if (hoveredLayer && hoveredLayer !== activeLayer) hoveredLayer.setStyle(BASE_STYLE);
+            hoveredLayer = null;
+        }
+
+        // Mouse leaving the map entirely (fast exit past the edge) also clears the hover
+        map.getContainer().addEventListener("mouseleave", clearHover);
+
+        // Safety net for a missed mouseout onto empty map or a popup: if the pointer is no
+        // longer over the hovered precinct's own shape, clear it.
+        map.on("mousemove", function (e) {
+            if (hoveredLayer && e.originalEvent.target !== hoveredLayer.getElement()) clearHover();
+        });
+
         function onEachFeature(feature, layer) {
             // Click-only popup. Panning once on click is fine.
             layer.bindPopup(buildContent(feature.properties), { autoPanPadding: [20, 20], maxWidth: 350 });
 
-            // Hover only highlights the precinct
+            // Hover only highlights the precinct. The browser can skip a mouseout when the
+            // mouse moves fast (bringToFront re-inserts the SVG path, which drops its hover
+            // state), so we track the hovered layer ourselves and clear it on the next hover.
             layer.on("mouseover", function () {
+                clearHover();
                 if (layer === activeLayer) return;
+                hoveredLayer = layer;
                 layer.setStyle(HOVER_STYLE);
                 layer.bringToFront();
             });
 
             layer.on("mouseout", function () {
-                if (layer !== activeLayer) layer.setStyle(BASE_STYLE);
+                if (hoveredLayer === layer) clearHover();
             });
 
             layer.on("click", function (e) {
+                if (hoveredLayer === layer) hoveredLayer = null; // now styled as active, not hover
                 // Opening this popup closes any other one first, whose popupclose
                 // handler resets that precinct's style.
                 layer.openPopup(e.latlng);
